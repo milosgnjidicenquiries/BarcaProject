@@ -166,7 +166,7 @@ than write a frame it has no answer for.
 | kind | where it comes from |
 |---|---|
 | geometry, frame count, half boundaries | the organizers' published files, read through their own loaders |
-| weights, sigmas, thresholds, transition and duration priors | `config/r3p.toml`, fixed, versioned, digest `eb37a1758ea8ab0d` |
+| weights, sigmas, thresholds, transition and duration priors | `config/r3p.toml`, fixed, versioned, digest `eed08b805830d316` |
 | channel medians and MADs | computed from the unlabelled frames of the match being processed |
 | temperature `T` | solved on unlabelled frames so median confidence hits `target_median_confidence = 0.72` |
 | attacking direction, geometric ball frames | estimated from unlabelled frames |
@@ -175,8 +175,9 @@ than write a frame it has no answer for.
 
 ## 7. Evidence that exists, and the claim that does not
 
-**Tests.** 71 unit tests, stdlib `unittest`, fixed seeds, run with
-`python -W error::RuntimeWarning -m unittest discover -s tests -t .` — **all pass**, ~30 s.
+**Tests.** 80 unit tests, stdlib `unittest`, fixed seeds, run with
+`python -W error::RuntimeWarning -m unittest discover -s tests -t .` — **all pass**, ~30 s on an
+idle machine (~70 s under load).
 
 | file | pins |
 |---|---|
@@ -186,6 +187,7 @@ than write a frame it has no answer for.
 | `test_decoder.py` | the exact decoding objective, blip holding, half separation, restart modulation, determinism |
 | `test_submission.py` | the CSV contract, validator PASS/FAIL cases, byte-identical rewrites |
 | `test_pipeline.py` | end-to-end execution, integrity failure modes, reproducibility, the technical document |
+| `test_document.py` | the submission PDF's source: the six required headings, table shape, wrapped bullets, bold containing code, no raw markdown surviving |
 
 Three real model bugs were found by those tests and fixed rather than the tests being loosened:
 `_duplicate_pairs` was re-scaling metres by the pitch (ghost tracklets were undetectable), the
@@ -218,7 +220,7 @@ in this repository, and we will not invent one.
 
 1. The gated match assets are not present in this checkout (`data/` holds only its own README), so
    no real submission CSV has been produced here. Running `python run_pipeline.py --data-dir data
-   --team-name "TEAM_NAME"` against an unpacked bundle is the remaining step, and it is the step
+   --team-name "MilosG"` against an unpacked bundle is the remaining step, and it is the step
    whose output the organizers actually read.
 2. On our own simulator the decoder **over-segments**: 604 decoded spells against 449 latent ones,
    mean 6.82 s against 9.21 s. The honest response was to fix the three real bugs and stop; further

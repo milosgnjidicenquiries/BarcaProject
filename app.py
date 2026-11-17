@@ -35,7 +35,7 @@ from src import official, pipeline, settings  # noqa: E402
 from src.reporting import manifest, submission, summary  # noqa: E402
 
 LABEL_COLOURS = {"H": "#1f77b4", "A": "#d62728", "D": "#7f7f7f", "X": "#ffffff"}
-DEFAULT_TEAM = "R3P"
+DEFAULT_TEAM = "MilosG"
 
 
 # ---------------------------------------------------------------------------------------------

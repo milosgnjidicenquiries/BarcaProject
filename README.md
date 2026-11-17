@@ -39,11 +39,11 @@ only numpy and pandas. Python 3.10+ is fine; nothing here needs a GPU, torch, or
 ## Run
 
 ```bat
-python run_pipeline.py --data-dir data --team-name "TEAM_NAME"
+python run_pipeline.py --data-dir data --team-name "MilosG"
 ```
 
 That single line reads the tactical bundle from `data/`, runs the integrity checks, infers, writes
-`out/TEAM_NAME.csv` plus a manifest and two diagnostics CSVs, and validates the file with the
+`out/MilosG.csv` plus a manifest and two diagnostics CSVs, and validates the file with the
 organizers' own `evaluation/validate_submission.py` logic. Add `--reproduce-baseline` to also rebuild
 the official smooth-50 baseline from the ATD and compare bytes, `--public-check` to score against the
 published five-minute sample (alignment verification only — see the rules), `--strict` to make an
@@ -52,6 +52,20 @@ integrity failure stop the run.
 Exit codes: `0` ok, `2` data missing, `3` integrity failure under `--strict`, `4` the validator
 rejected the file, `5` a self-check was requested against something that is not a development
 fixture, `6` the bundle contains no graded frames.
+
+## The submission document
+
+```bat
+python docs\build_pdf.py
+```
+
+Renders [`docs/SUBMISSION_DOCUMENT.md`](docs/SUBMISSION_DOCUMENT.md) into `MilosG.pdf` in the
+repository root — the file the submission form asks for, named after the team because the board is
+labelled by file name. The markdown is the single source and is committed; the PDF is git-ignored
+(`*.pdf`), so the repository carries readable text and the form gets the upload. The builder needs
+no new dependency: it renders the markdown subset itself and prints through the Edge or Chrome that
+is already installed. `tests/test_document.py` checks the rendered structure, so a construct the
+converter does not understand fails a test instead of quietly vanishing from the PDF.
 
 ## Dashboard (read-only)
 
@@ -70,8 +84,8 @@ charts and video inspection for understanding, and forbid turning them into labe
 python -m unittest discover -s tests -t .
 ```
 
-71 tests, about 30 seconds, no network, no match data. They use fixed seeds and hand-built tracking
-arrays plus a synthetic bundle written in the delivered file formats:
+80 tests, about 30 seconds on an idle machine, no network, no match data. They use fixed seeds and
+hand-built tracking arrays plus a synthetic bundle written in the delivered file formats:
 
 | file | what it pins down |
 | --- | --- |
@@ -81,6 +95,7 @@ arrays plus a synthetic bundle written in the delivered file formats:
 | `tests/test_decoder.py` | the decoded path beating the frame-wise argmax and hand-built alternatives **on the documented objective**, the duration median landing on 6 s in frames, the halftime hole, restart modulation, `-1e30` vs `-inf`, determinism |
 | `tests/test_submission.py` | the official validator accepting our bytes and rejecting blanks, a one-based frame column, unknown letters and a short file; LF-only bytes; refusing to write unlabeled frames |
 | `tests/test_pipeline.py` | end-to-end on a real bundle on disk, byte-identical reruns, controlled turnovers recovered, the integrity layer catching a wrong-length input, and the exported technical document containing no number the run did not produce |
+| `tests/test_document.py` | the submission PDF's own source: the six headings `SUBMISSION.md` demands, tables keeping their rows and columns, wrapped bullets staying one item, bold containing inline code rendering as both, and no raw markdown surviving into the uploaded file |
 
 ## What is in the repository
 
@@ -96,7 +111,7 @@ src/reporting/             the submission CSV, the manifest, the human-readable 
 src/evaluation/scoring.py  calls the organizers' scorer; never re-implements it
 run_pipeline.py            the CLI
 app.py                     the read-only Streamlit dashboard
-tests/                     71 unittest cases, fixed seeds, no match data
+tests/                     80 unittest cases, fixed seeds, no match data
 ```
 
 `data/`, `out/`, `scratch/`, every bundle, every CSV and every log are git-ignored. **The submission

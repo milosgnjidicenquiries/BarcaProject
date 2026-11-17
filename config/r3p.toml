@@ -26,7 +26,7 @@
 [meta]
 # Placeholder, overridden by --team-name. Appears in the output filename (<team>.csv), the run
 # manifest, the technical document and the dashboard header, so it is set in exactly one place.
-team_name = "R3P"
+team_name = "MilosG"
 model_name = "R3P"
 model_version = "1.0.0"
 seed = 20271117                      # [model] no stochastic component remains; kept so the
