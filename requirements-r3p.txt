@@ -1,0 +1,24 @@
+# R3P -- pinned environment
+#
+# `requirements.txt` is the organizers' file and is deliberately left untouched: the scorer needs
+# numpy and pandas and nothing else. This file is the *reproducibility* pin for R3P -- the exact
+# versions this code was written and tested against, so that `out/<TEAM>.csv` can be rebuilt byte for
+# byte by someone who is not this author.
+#
+# Verified on: Python 3.13.14, Windows 11 (10.0.22631), x64.
+#   python -m pip install -r requirements-r3p.txt
+#
+# The two packages the model imports are numpy and pandas. Streamlit is only needed for app.py, the
+# read-only inspection dashboard, and the run works without it.
+
+numpy==2.2.6
+pandas==2.2.3
+streamlit==1.67.0
+
+# Optional: only for starter/load_atd.py's kloppy path. src/data/atd.py streams the ATD itself and
+# does not need it. See requirements-starter.txt (the organizers' file) for their pin.
+# kloppy==3.18.0
+# matplotlib
+
+# Not needed: the test suite is stdlib `unittest`, so `python -m unittest discover -s tests -t .`
+# installs nothing.

@@ -1,0 +1,237 @@
+# ================================================================================================
+# R3P -- Reliability-weighted, Restart-aware, Run-length-regularized Possession Model
+#
+# Every number the pipeline uses lives here and nowhere else, so a run is fully described by
+# (this file, the data bundle, the seed). `run_pipeline.py` copies the resolved config into the
+# run manifest, which is what makes rule 3 of RULES.md ("a file your repository cannot regenerate"
+# is a rule violation) checkable.
+#
+# COMPLIANCE NOTE ON PROVENANCE OF THESE NUMBERS
+# ----------------------------------------------
+# None of these values was chosen by looking at a score. The public five-minute ground truth is
+# never read by the model, by this config, or by any parameter search -- see docs/COMPLIANCE.md.
+# Each parameter below carries where it comes from:
+#
+#   [physics]  a property of football or of metric geometry, arguable without data
+#   [derived]  estimated at run time from the UNLABELLED match itself (self-supervised)
+#   [format]   a fact about the delivered file layout, from DATA.md / games.py
+#   [model]    a choice inside the R3P formulation, justified analytically
+#
+# Deliberately NOT used, although DATA.md publishes it: the public window's mean possession
+# duration of 14.191 s and its 17 possessions. Those are ground-truth derived, so setting our
+# duration prior from them would be tuning on the answer key. The duration prior here is a
+# football-reasoning prior instead, and is visibly different.
+# ================================================================================================
+
+[meta]
+# Placeholder, overridden by --team-name. Appears in the output filename (<team>.csv), the run
+# manifest, the technical document and the dashboard header, so it is set in exactly one place.
+team_name = "R3P"
+model_name = "R3P"
+model_version = "1.0.0"
+seed = 20271117                      # [model] no stochastic component remains; kept so the
+                                     #         manifest is byte-comparable across runs
+
+# ------------------------------------------------------------------------------------------------
+# Component A -- reliability-weighted evidence fusion
+#
+# Distances are metric: d = sqrt((105.3 * dx)^2 + (68.0 * dy)^2), with dx, dy in the normalised
+# 0-1 ATD convention. The pitch comes from games.GAMES["BAR-ATH"]["pitch"] and is NOT repeated
+# here, so a correction upstream cannot drift into the features.
+# ------------------------------------------------------------------------------------------------
+[fusion]
+sigma_control_m = 3.0        # [physics] radius inside which a player can be said to be able to
+                             #          touch the ball: standing reach + one step + the ball's own
+                             #          travel between frames. Used in S_team's Gaussian kernel.
+sigma_support_m = 7.0        # [physics] "a teammate is close enough to be the pass target" radius:
+                             #          a short combination. Looser than control because support is
+                             #          a prior, not a touch.
+near_pairs_k = 2             # [model] how many nearest opponents of the ball carrier to look at.
+temporal_smooth_frames = 12  # [physics] 0.48 s at 25 fps: longer than one stride of ball movement,
+                             #          shorter than a pass in flight, so it averages jitter
+                             #          without smearing a turnover into its neighbours.
+
+# Block weights. Blocks are constructed to answer different questions (who can touch it / what is
+# the ball doing / who is shaped to receive / who had it a moment ago / what the automatic tagger
+# thinks) and each is standardised on the unlabelled match before weighting, so these numbers are
+# comparable to one another. They are deliberately small: R3P's separation of concerns puts the
+# temporal decision in component C, and an evidence term that dominates here just pre-empts it.
+[fusion.weights]
+nearest = 1.00               # [model] per-team nearest-player distance (the only term that can
+                             #          name a touch)
+soft_proximity = 0.70        # [model] S_team -- the whole team's distance distribution, which
+                             #          separates "one player bundled and lucky" from "a team in
+                             #          possession around the ball". Correlated with `nearest` by
+                             #          construction, so it enters as a LOG-RATIO (see
+                             #          features/evidence.py) and at lower weight: the correlation
+                             #          is removed where it can be, discounted where it cannot.
+support = 0.35               # [model] teammates near the closest player of the same team
+ball_kinematics = 0.55       # [model] ball speed + whether it travels away from that team's
+                             #          candidate and toward the opposition goal
+territory = 0.30             # [model] which half of the pitch the team is defending [derived]
+continuity = 0.45            # [model] short-window agreement of the instantaneous winner -- an
+                             #          OBSERVATION statistic over a +-0.48 s window, never the
+                             #          previously decoded label. Temporal consistency is component
+                             #          C's job; doubling it here would be the classic
+                             #          double-count.
+tagging = 0.40               # [model] Smart Tagging is automatic and wrong in places: capped and
+                             #          never allowed to set a label on its own.
+
+# Reliability of the ball channel. rho multiplies every ball-dependent term, so a frame with a
+# 2-second-old ball estimate contributes proportionally less evidence rather than a confident lie.
+[fusion.reliability]
+ball_gap_tau_frames = 10.0   # [physics] 0.4 s. How fast trust in an extrapolated ball decays;
+                             #          a struck ball crosses most of the pitch inside that time.
+ball_gap_max_frames = 25     # [physics] 1 s, after which extrapolation is fiction, not estimate.
+geo_impute_rho = 0.35        # [model] trust in the ball position INFERRED from player geometry
+                             #          (the densest 2-3 player cluster) when the ball track is
+                             #          gone. Above zero so 41% of frames are not thrown away; well
+                             #          below 1 so they cannot outvote a real observation.
+duplicate_slot_radius_m = 1.5  # [physics] two slots closer than a player's body width are almost
+                               #           certainly the same person tracked twice -- that frame's
+                               #           proximity stats are pooled over a crowd of ghosts, so
+                               #           reliability drops.
+min_players_for_evidence = 8 # [physics] below this many visible players the "team" comparison is
+                             #          mostly absence of data rather than presence of football.
+
+# ------------------------------------------------------------------------------------------------
+# Component B -- dead ball vs team possession, as two connected decisions
+#
+# p_D = P(ball not in play) from its own head; q = P(home | in play) from the fused evidence.
+# Emissions are then P(D) = p_D, P(H) = (1 - p_D) q, P(A) = (1 - p_D)(1 - q).
+# Keeping them separate is what stops "we cannot see the ball" from being read as "the ball is
+# dead", which is the single most common way a possession segmenter loses spellF1.
+# ------------------------------------------------------------------------------------------------
+[deadball]
+static_speed_mps = 1.2       # [physics] a ball in play under control is rolling or travelling; a
+                             #          player standing over it for a set piece is not. Below this
+                             #          for the whole window is the strongest alive/dead cue that
+                             #          does not need a label. Above it is the strongest cue that
+                             #          the ball IS in play, and that one is the other half of the
+                             #          same measurement, not a new assumption.
+static_window_frames = 25    # [physics] 1 s: shorter and a stutter in the ball track reads as a
+                             #          stoppage. Averaged over frames where the ball was seen;
+                             #          a dropout is not a stationary ball.
+static_weight = 2.20         # [model] the stationary-ball cue, the head's main term.
+alive_motion_weight = 2.00   # [model] applied with a MINUS sign: a moving ball is in play. This is
+                             #          what keeps p_dead small during live football instead of
+                             #          parking it at the prior, and it is the reason the head is a
+                             #          classifier rather than a penalty list.
+oob_weight = 1.80            # [model] the ball over a line stops play by the Laws.
+oob_margin_m = 1.8           # [physics] half a player-width outside the touch/goal line means the
+                             #          ball is over the line, which by the Laws stops play. The
+                             #          margin absorbs normalised-coordinate rounding and the 30 cm
+                             #          pitch-size disagreement between the ATD metadata and
+                             #          games.py.
+missing_gap_frames = 40      # [model] 1.6 s of no ball observation is suspicious but NOT proof of
+                             #          a dead ball -- DATA.md: the ball is missing on 41% of
+                             #          graded frames, including deep in live play. This only
+                             #          switches on the weak geometric cue, and its weight is
+                             #          capped below.
+missing_weight = 0.55        # [model] deliberately the weakest of the four dead-ball cues.
+motion_collapse_weight = 0.80  # [model] almost every player walking/standing: a free kick or a
+                               #           goal celebration, not live football.
+tagging_weight = 0.75        # [model] a SET PIECES interval is evidence of a stoppage, and the
+                             #          tagger has false positives; capped, and never copied.
+wall_cluster_players = 6     # [physics] a free-kick wall/restart crowd.
+wall_cluster_radius_m = 9.0  # [physics] players pack into roughly this disc around a set piece.
+wall_weight = 0.45           # [model] weak on its own: crowds gather in live play too.
+logit_scale = 1.0            # [model] temperature on the dead-ball head.
+prior_logodds = -0.35        # [model] how dead the model assumes an average frame is BEFORE
+                             #          evidence. Football is mostly played; a neutral 0.0 would
+                             #          over-predict D once the stationary-ball cue fires on
+                             #          ordinary slow passes.
+
+[tagging]
+# Team names in the Smart Tagging XML are clubs, and the spelling is the export's own
+# ("Atletic Club", one 'h' -- DATA.md). Matched case-insensitively; see features/tag_features.py.
+home_values = ["barcelona", "bar", "barcelona fc", "fcb"]
+away_values = ["atletic club", "athletic club", "ath", "athletic bilbao"]
+na_values = ["n/a", "na", "", "none", "unknown"]
+restart_types = ["throw-in", "corner kick", "goal kick", "free kick",
+                 "kick off (after goal)", "kick off (start)", "penalty"]
+set_piece_codes = ["set pieces"]
+phase_window_frames = 25     # [physics] tags are accurate to about a second (DATA.md), so a one-
+                             #          second buffer absorbs that without pretending precision.
+
+# ------------------------------------------------------------------------------------------------
+# Component C -- duration-aware temporal decoding
+#
+# argmax over sequences of  sum_t log emission_t(s_t)  +  sum_t log A[s_{t-1}][s_t]
+#                        +  sum_runs log p_dur(s, length)
+# solved exactly by an age-expanded Viterbi, per half, so the 20156-frame halftime hole can never
+# create a phantom transition (the official scorer's own valid_runs() makes the same cut).
+# ------------------------------------------------------------------------------------------------
+[decoder]
+max_duration_frames = 900    # [model] 36 s. Beyond this the prior is replaced by a geometric tail,
+                             #          which is what keeps a genuinely long spell possible
+                             #          instead of forcing a transition the truth does not have.
+tail_survival = 0.99         # [model] per-frame probability of continuing past max_duration, i.e.
+                             #          a mean of 100 extra frames. Small, not zero.
+
+# Log-normal run-length priors, median in SECONDS of football rather than tuned to anything.
+# [physics] A team with the ball in open play keeps it for several seconds; a stoppage is a kick,
+# a whistle and a restart. The shapes below say "a one-second possession is possible but
+# surprising" -- which is exactly the hysteresis that protects against tracking jitter -- while
+# still leaving the left tail open, so a real two-second counter-attack can still win against it
+# when the emissions are strong. That trade-off is the whole point of run-length regularisation
+# and it is why no minimum-run-length hard constraint is used anywhere in R3P.
+[decoder.duration.H]
+median_s = 6.0
+sigma_log = 0.90
+[decoder.duration.A]
+median_s = 6.0
+sigma_log = 0.90
+[decoder.duration.D]
+median_s = 7.0
+sigma_log = 0.85
+
+# Transition matrix: probability that, AT THE MOMENT A SPELL ENDS, the next state is this one.
+# Row D sums to 1 over H/A because a stoppage must restart with somebody.
+# [physics] Roughly as many possessions end in a turnover as in a stoppage; a direct H<->A change
+# is the interception/tackle case and must stay cheap, or the decoder invents dead balls to avoid
+# it and destroys the D class.
+[decoder.transition]
+H_to_A = 0.45
+H_to_D = 0.55
+A_to_H = 0.45
+A_to_D = 0.55
+D_to_H = 0.50
+D_to_A = 0.50
+
+[decoder.restart]
+enabled = true
+strength = 1.10              # [model] log-odds added to D -> (restarting team) when restart
+                             #          evidence is present. Restarts are the one moment the
+                             #          possession is unambiguous, so this is the highest-confidence
+                             #          contextual signal in the model -- still bounded, because the
+                             #          tagger that supplies the team is automatic.
+window_frames = 50           # [physics] 2 s after the ball comes back into play.
+[decoder.abstain]
+# Inside graded frames, R3P answers rather than abstaining. X costs a certain macroF1 miss (the
+# first tie-break) and buys nothing on spellF1 unless the frame really is mid-possession and the
+# model really is lost -- and forward-fill across a hand-over then bleeds the old label into the
+# new state. So the threshold is set very low and the policy is auditable in the manifest.
+enabled = false
+below_prob = 0.34            # [model] abstain only when all three states are simultaneously
+                             #          implausible, i.e. the evidence is absent, not merely
+                             #          split. Requires the restart window AND a dead-low
+                             #          reliability, so with enabled = true this fires rarely.
+min_gap_frames = 25          # [model] never a single-frame island of X.
+outside_graded = "X"         # [format] ungraded frames (pre-kickoff, halftime, post-whistle) are
+                             #          never scored, so abstention there is the honest answer.
+
+[calibration]
+# [derived] The temperature that maps fused log-evidence to probabilities is not hand-set. It is
+# solved on the UNLABELLED match so that the median per-frame confidence lands on target_median.
+# No label of any kind enters this computation; it fixes the scale of a standardised score.
+target_median_confidence = 0.72
+min_temperature = 0.25
+max_temperature = 8.0
+mad_floor = 1e-6             # [model] guard against a constant feature dividing by zero.
+
+[output]
+dir = "out"
+abstain_outside_graded = true
+write_diagnostics = true     # [model] per-transition confidence table, for the dashboard and the
+                             #          technical document. Never feeds back into the labels.
